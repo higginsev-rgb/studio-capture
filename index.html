@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="theme-color" content="#7c3a1c" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="icon.svg" />
+<title>Studio Capture</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif; }
+  textarea { font-family: inherit; }
+  /* Bigger touch targets on mobile */
+  button { min-height: 44px; }
+  .chip { padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; }
+  /* Recording pulse */
+  @keyframes pulse-red { 0%,100% { background: #dc2626; } 50% { background: #f87171; } }
+  .recording { animation: pulse-red 1s ease-in-out infinite; }
+</style>
+</head>
+<body class="bg-stone-50 text-stone-900 dark:bg-stone-900 dark:text-stone-100 min-h-screen pb-24">
+
+<div x-data="studioApp()" x-init="init()" class="max-w-2xl mx-auto px-4 pt-safe">
+
+  <!-- ============================ HEADER ============================ -->
+  <header class="sticky top-0 z-10 bg-stone-50/90 dark:bg-stone-900/90 backdrop-blur py-3 -mx-4 px-4 mb-2 border-b border-stone-200 dark:border-stone-800">
+    <div class="flex items-center justify-between">
+      <h1 class="text-xl font-semibold">
+        <span x-show="view==='home'">Studio Capture</span>
+        <span x-show="view==='session'" x-text="currentSession?.date"></span>
+        <span x-show="view==='history'">History</span>
+      </h1>
+      <div class="flex gap-1">
+        <button @click="view='home'" class="px-3 py-1 text-sm rounded-md" :class="view==='home'?'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900':'text-stone-500'">Today</button>
+        <button @click="view='history'" class="px-3 py-1 text-sm rounded-md" :class="view==='history'?'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900':'text-stone-500'">History</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============================ HOME VIEW ============================ -->
+  <section x-show="view==='home'" x-cloak>
+    <template x-if="!currentSession">
+      <div class="text-center py-12">
+        <div class="text-6xl mb-4">🏺</div>
+        <p class="text-stone-500 mb-6">No session in progress.</p>
+        <button @click="startSession()" class="bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 px-6 py-3 rounded-full font-medium">
+          Start new session
+        </button>
+      </div>
+    </template>
+
+    <template x-if="currentSession">
+      <div>
+        <!-- Plan input area -->
+        <div class="bg-white dark:bg-stone-800 rounded-2xl p-4 mb-4 shadow-sm">
+          <div class="flex items-center justify-between mb-2">
+            <h2 class="font-medium">Plan for today</h2>
+            <span class="text-xs text-stone-500" x-text="currentSession.tasks.length + ' tasks'"></span>
+          </div>
+
+          <!-- Add task form -->
+          <div class="space-y-2">
+            <div class="flex gap-2">
+              <select x-model="newTask.type" class="bg-stone-100 dark:bg-stone-700 rounded-lg px-2 py-2 text-sm">
+                <option value="throw">Throw</option>
+                <option value="trim">Trim</option>
+                <option value="glaze">Glaze</option>
+                <option value="bisque">Bisque-fire</option>
+                <option value="deliver">Deliver / drop-off</option>
+                <option value="reclaim">Clay reclaim</option>
+                <option value="other">Other</option>
+              </select>
+              <input
+                x-model="newTask.description"
+                @keyup.enter="addTask()"
+                placeholder="e.g. small mug for Anna"
+                class="flex-1 bg-stone-100 dark:bg-stone-700 rounded-lg px-3 py-2 text-sm" />
+            </div>
+
+            <!-- Shrinkage helper, only shown when throwing -->
+            <div x-show="newTask.type==='throw'" class="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3 space-y-2">
+              <div class="text-xs text-amber-800 dark:text-amber-200 font-medium">Target fired size (cm)</div>
+              <div class="flex gap-2 items-center text-sm">
+                <input type="number" step="0.5" x-model.number="newTask.target_h" placeholder="height"
+                       class="w-20 bg-white dark:bg-stone-800 rounded px-2 py-1" />
+                <span>×</span>
+                <input type="number" step="0.5" x-model.number="newTask.target_w" placeholder="width"
+                       class="w-20 bg-white dark:bg-stone-800 rounded px-2 py-1" />
+                <span class="text-xs text-stone-500">cm fired</span>
+              </div>
+              <div class="text-xs text-amber-800 dark:text-amber-200" x-show="newTask.target_h || newTask.target_w">
+                ➜ Throw wet at
+                <span class="font-semibold" x-text="wetSize(newTask.target_h)"></span>
+                ×
+                <span class="font-semibold" x-text="wetSize(newTask.target_w)"></span>
+                cm
+                <span class="text-stone-500">(×<span x-text="(1/(1-SHRINK)).toFixed(3)"></span> to compensate for <span x-text="(SHRINK*100).toFixed(0)"></span>% shrinkage)</span>
+              </div>
+            </div>
+
+            <button @click="addTask()" class="w-full bg-stone-200 dark:bg-stone-700 rounded-lg py-2 text-sm font-medium">
+              + Add task
+            </button>
+          </div>
+        </div>
+
+        <!-- Task list -->
+        <div class="space-y-3 mb-4">
+          <template x-for="(task, idx) in currentSession.tasks" :key="task.id">
+            <div class="bg-white dark:bg-stone-800 rounded-2xl shadow-sm overflow-hidden">
+
+              <!-- Collapsed row -->
+              <div class="flex items-center gap-3 px-4 py-3" @click="task.expanded = !task.expanded">
+                <button
+                  @click.stop="task.status = task.status==='done' ? 'planned' : 'done'"
+                  class="w-7 h-7 rounded-full border-2 flex items-center justify-center shrink-0"
+                  :class="task.status==='done' ? 'bg-green-500 border-green-500' : 'border-stone-400'">
+                  <span x-show="task.status==='done'" class="text-white text-sm">✓</span>
+                </button>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="chip" :class="typeStyle(task.type)" x-text="task.type"></span>
+                    <span class="text-sm truncate" x-text="task.description || '(no description)'"></span>
+                  </div>
+                  <div x-show="task.target_h || task.target_w" class="text-xs text-stone-500 mt-1">
+                    target: <span x-text="task.target_h || '?'"></span>×<span x-text="task.target_w || '?'"></span>cm fired · throw at <span x-text="wetSize(task.target_h)"></span>×<span x-text="wetSize(task.target_w)"></span>cm
+                  </div>
+                </div>
+                <span class="text-stone-400 text-xs" x-text="task.expanded ? '▾' : '▸'"></span>
+              </div>
+
+              <!-- Expanded: notes + voice + photo -->
+              <div x-show="task.expanded" x-collapse class="px-4 pb-4 space-y-3 border-t border-stone-100 dark:border-stone-700 pt-3">
+
+                <!-- Voice + textarea -->
+                <div>
+                  <div class="flex items-center justify-between mb-1">
+                    <label class="text-xs font-medium text-stone-600 dark:text-stone-400">Notes</label>
+                    <button
+                      @click="toggleVoice(task)"
+                      class="w-10 h-10 rounded-full text-white flex items-center justify-center text-lg shadow"
+                      :class="recordingTaskId===task.id ? 'recording' : 'bg-stone-700 dark:bg-stone-600'"
+                      :title="recordingTaskId===task.id ? 'Stop recording' : 'Voice dictate'">
+                      <span x-show="recordingTaskId!==task.id">🎙</span>
+                      <span x-show="recordingTaskId===task.id">⏺</span>
+                    </button>
+                  </div>
+                  <textarea
+                    x-model="task.notes"
+                    rows="3"
+                    placeholder="What happened? What did you learn?"
+                    class="w-full bg-stone-50 dark:bg-stone-900 rounded-lg p-2 text-sm"></textarea>
+                </div>
+
+                <!-- Photos -->
+                <div>
+                  <label class="text-xs font-medium text-stone-600 dark:text-stone-400 block mb-1">Photos</label>
+                  <div class="flex gap-2 flex-wrap">
+                    <template x-for="(photo, pIdx) in task.photos" :key="pIdx">
+                      <div class="relative">
+                        <img :src="photo" class="w-20 h-20 object-cover rounded-lg" />
+                        <button @click="task.photos.splice(pIdx, 1); save()"
+                                class="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-5 h-5 text-xs">×</button>
+                      </div>
+                    </template>
+                    <label class="w-20 h-20 border-2 border-dashed border-stone-300 dark:border-stone-600 rounded-lg flex items-center justify-center text-2xl text-stone-400 cursor-pointer">
+                      +
+                      <input type="file" accept="image/*" capture="environment" class="hidden"
+                             @change="addPhoto(task, $event)" />
+                    </label>
+                  </div>
+                </div>
+
+                <!-- Link to existing piece -->
+                <div>
+                  <label class="text-xs font-medium text-stone-600 dark:text-stone-400 block mb-1">Link to piece (optional)</label>
+                  <input x-model="task.piece_id"
+                         placeholder="e.g. P-2026-029"
+                         class="w-full bg-stone-50 dark:bg-stone-900 rounded-lg px-2 py-1 text-sm" />
+                </div>
+
+                <button @click="removeTask(idx)" class="text-xs text-red-600">Remove task</button>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- End session card -->
+        <div class="bg-white dark:bg-stone-800 rounded-2xl p-4 shadow-sm space-y-3">
+          <h2 class="font-medium">Wrap up</h2>
+          <div>
+            <label class="text-xs font-medium text-stone-600 dark:text-stone-400 block mb-1">Session summary</label>
+            <textarea x-model="currentSession.summary" rows="2"
+                      placeholder="What did I actually do?"
+                      class="w-full bg-stone-50 dark:bg-stone-900 rounded-lg p-2 text-sm"></textarea>
+          </div>
+          <div>
+            <label class="text-xs font-medium text-stone-600 dark:text-stone-400 block mb-1">For next time</label>
+            <textarea x-model="currentSession.next_steps" rows="2"
+                      placeholder="What do I want to remember / try next?"
+                      class="w-full bg-stone-50 dark:bg-stone-900 rounded-lg p-2 text-sm"></textarea>
+          </div>
+          <div class="flex gap-2">
+            <button @click="endSession()" class="flex-1 bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 rounded-lg py-2 font-medium">
+              End session
+            </button>
+            <button @click="exportSession(currentSession)" class="px-3 bg-stone-200 dark:bg-stone-700 rounded-lg text-sm">
+              Export
+            </button>
+          </div>
+        </div>
+      </div>
+    </template>
+  </section>
+
+  <!-- ============================ HISTORY VIEW ============================ -->
+  <section x-show="view==='history'" x-cloak>
+    <template x-if="sessions.length === 0">
+      <p class="text-stone-500 text-center py-12">No past sessions yet.</p>
+    </template>
+    <div class="space-y-2">
+      <template x-for="s in pastSessions" :key="s.id">
+        <div class="bg-white dark:bg-stone-800 rounded-xl p-4 shadow-sm">
+          <div class="flex items-center justify-between mb-1">
+            <span class="font-medium" x-text="s.date"></span>
+            <span class="text-xs text-stone-500" x-text="s.tasks.length + ' tasks · ' + s.tasks.filter(t=>t.status==='done').length + ' done'"></span>
+          </div>
+          <p class="text-sm text-stone-600 dark:text-stone-400 truncate" x-text="s.summary || '(no summary)'"></p>
+          <div class="flex gap-2 mt-2">
+            <button @click="openSession(s)" class="text-xs text-blue-600">Open</button>
+            <button @click="exportSession(s)" class="text-xs text-stone-500">Export CSV</button>
+            <button @click="deleteSession(s)" class="text-xs text-red-500 ml-auto">Delete</button>
+          </div>
+        </div>
+      </template>
+    </div>
+    <div class="mt-6 text-center">
+      <button @click="exportAll()" class="text-sm underline text-stone-500">Export all sessions as CSV</button>
+    </div>
+  </section>
+
+</div>
+
+<script>
+function studioApp() {
+  return {
+    SHRINK: 0.12,                  // 12% total clay shrinkage (from Claymade data)
+    view: 'home',
+    sessions: [],
+    currentSession: null,
+    newTask: { type: 'throw', description: '', target_h: null, target_w: null },
+    recognition: null,
+    recordingTaskId: null,
+
+    init() {
+      this.load();
+      const today = new Date().toISOString().slice(0,10);
+      const todaysSession = this.sessions.find(s => s.date === today && !s.ended_at);
+      if (todaysSession) this.currentSession = todaysSession;
+    },
+
+    // ----- Shrinkage calc -----
+    wetSize(target) {
+      if (!target) return '?';
+      return (target / (1 - this.SHRINK)).toFixed(1);
+    },
+
+    // ----- Persistence -----
+    load() {
+      try { this.sessions = JSON.parse(localStorage.getItem('studio_sessions') || '[]'); }
+      catch (e) { this.sessions = []; }
+    },
+    save() {
+      localStorage.setItem('studio_sessions', JSON.stringify(this.sessions));
+    },
+
+    // ----- Session lifecycle -----
+    startSession() {
+      const s = {
+        id: crypto.randomUUID(),
+        date: new Date().toISOString().slice(0,10),
+        started_at: new Date().toISOString(),
+        ended_at: null,
+        summary: '',
+        next_steps: '',
+        tasks: []
+      };
+      this.sessions.push(s);
+      this.currentSession = s;
+      this.save();
+    },
+    endSession() {
+      if (!this.currentSession) return;
+      this.currentSession.ended_at = new Date().toISOString();
+      this.save();
+      this.currentSession = null;
+      this.view = 'history';
+    },
+    openSession(s) {
+      this.currentSession = s;
+      this.view = 'home';
+    },
+    deleteSession(s) {
+      if (!confirm('Delete this session?')) return;
+      this.sessions = this.sessions.filter(x => x.id !== s.id);
+      if (this.currentSession?.id === s.id) this.currentSession = null;
+      this.save();
+    },
+    get pastSessions() {
+      return [...this.sessions].sort((a,b) => b.date.localeCompare(a.date));
+    },
+
+    // ----- Tasks -----
+    addTask() {
+      if (!this.currentSession) return;
+      const desc = this.newTask.description.trim();
+      if (!desc) return;
+      this.currentSession.tasks.push({
+        id: crypto.randomUUID(),
+        type: this.newTask.type,
+        description: desc,
+        target_h: this.newTask.target_h || null,
+        target_w: this.newTask.target_w || null,
+        status: 'planned',
+        notes: '',
+        photos: [],
+        piece_id: '',
+        expanded: false
+      });
+      this.newTask = { type: this.newTask.type, description: '', target_h: null, target_w: null };
+      this.save();
+    },
+    removeTask(idx) {
+      if (!confirm('Remove this task?')) return;
+      this.currentSession.tasks.splice(idx, 1);
+      this.save();
+    },
+    typeStyle(type) {
+      return {
+        throw: 'bg-amber-100 text-amber-800',
+        trim: 'bg-yellow-100 text-yellow-800',
+        glaze: 'bg-blue-100 text-blue-800',
+        bisque: 'bg-orange-100 text-orange-800',
+        deliver: 'bg-green-100 text-green-800',
+        reclaim: 'bg-stone-200 text-stone-700',
+        other: 'bg-stone-200 text-stone-700',
+      }[type] || 'bg-stone-200 text-stone-700';
+    },
+
+    // ----- Photos -----
+    async addPhoto(task, event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const dataUrl = await this.resizeImage(file, 1280);
+      task.photos.push(dataUrl);
+      this.save();
+      event.target.value = '';
+    },
+    resizeImage(file, maxSize) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          let { width, height } = img;
+          if (width > height && width > maxSize) { height = (height * maxSize) / width; width = maxSize; }
+          else if (height > maxSize) { width = (width * maxSize) / height; height = maxSize; }
+          const canvas = document.createElement('canvas');
+          canvas.width = width; canvas.height = height;
+          canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', 0.82));
+        };
+        img.src = URL.createObjectURL(file);
+      });
+    },
+
+    // ----- Voice -----
+    toggleVoice(task) {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR) { alert('Voice dictation not supported in this browser. iOS Safari 14+ recommended.'); return; }
+
+      if (this.recordingTaskId === task.id) {
+        this.recognition?.stop();
+        return;
+      }
+      this.recognition?.stop();
+
+      const rec = new SR();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = 'en-US';
+      let finalText = task.notes;
+      const prefix = finalText && !finalText.endsWith(' ') ? finalText + ' ' : finalText;
+
+      rec.onresult = (e) => {
+        let interim = '';
+        let final = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const t = e.results[i][0].transcript;
+          if (e.results[i].isFinal) final += t;
+          else interim += t;
+        }
+        if (final) finalText = (finalText + ' ' + final).trim();
+        task.notes = (finalText + ' ' + interim).trim();
+      };
+      rec.onend = () => {
+        this.recordingTaskId = null;
+        this.save();
+      };
+      rec.onerror = (e) => {
+        console.error('Speech error:', e.error);
+        this.recordingTaskId = null;
+      };
+
+      rec.start();
+      this.recognition = rec;
+      this.recordingTaskId = task.id;
+    },
+
+    // ----- Export -----
+    exportSession(s) {
+      const sessionCsv = this.toCsv(
+        ['session_id','date','started_at','ended_at','summary','next_steps','task_count','tasks_done'],
+        [[s.id, s.date, s.started_at, s.ended_at || '', s.summary, s.next_steps, s.tasks.length, s.tasks.filter(t=>t.status==='done').length]]
+      );
+      const taskRows = s.tasks.map(t => [
+        s.id, s.date, t.type, t.description,
+        t.target_h || '', t.target_w || '',
+        t.target_h ? this.wetSize(t.target_h) : '',
+        t.target_w ? this.wetSize(t.target_w) : '',
+        t.status, t.piece_id, (t.notes||'').replace(/\n/g,' '), t.photos.length
+      ]);
+      const taskCsv = this.toCsv(
+        ['session_id','date','type','description','target_h_cm','target_w_cm','wet_h_cm','wet_w_cm','status','piece_id','notes','photo_count'],
+        taskRows
+      );
+      this.downloadFile(`session-${s.date}-summary.csv`, sessionCsv);
+      this.downloadFile(`session-${s.date}-tasks.csv`, taskCsv);
+      // Photos: dump each as separate file
+      s.tasks.forEach((t, ti) => {
+        t.photos.forEach((p, pi) => {
+          const blob = this.dataUrlToBlob(p);
+          this.downloadBlob(`session-${s.date}-task${ti+1}-photo${pi+1}.jpg`, blob);
+        });
+      });
+    },
+    exportAll() {
+      const headers = ['session_id','date','type','description','target_h_cm','target_w_cm','wet_h_cm','wet_w_cm','status','piece_id','notes','photo_count','summary','next_steps'];
+      const rows = [];
+      for (const s of this.sessions) {
+        for (const t of s.tasks) {
+          rows.push([
+            s.id, s.date, t.type, t.description,
+            t.target_h || '', t.target_w || '',
+            t.target_h ? this.wetSize(t.target_h) : '',
+            t.target_w ? this.wetSize(t.target_w) : '',
+            t.status, t.piece_id, (t.notes||'').replace(/\n/g,' '), t.photos.length,
+            s.summary, s.next_steps
+          ]);
+        }
+      }
+      this.downloadFile('all-sessions.csv', this.toCsv(headers, rows));
+    },
+    toCsv(headers, rows) {
+      const esc = (v) => {
+        const s = String(v ?? '');
+        return /[,"\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
+      };
+      return [headers.map(esc).join(','), ...rows.map(r => r.map(esc).join(','))].join('\n');
+    },
+    downloadFile(name, content) {
+      const blob = new Blob([content], { type: 'text/csv' });
+      this.downloadBlob(name, blob);
+    },
+    downloadBlob(name, blob) {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    },
+    dataUrlToBlob(dataUrl) {
+      const [meta, b64] = dataUrl.split(',');
+      const mime = meta.match(/:(.*?);/)[1];
+      const bin = atob(b64);
+      const arr = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      return new Blob([arr], { type: mime });
+    },
+  };
+}
+
+// Save on any state mutation (Alpine reactivity-friendly)
+document.addEventListener('alpine:init', () => {
+  Alpine.effect(() => {
+    // throttled save handled inside actions instead
+  });
+});
+
+// Register service worker for offline / PWA install
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+</script>
+
+</body>
+</html>
